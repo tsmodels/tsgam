@@ -7,10 +7,10 @@ version <- as.vector(read.dcf('DESCRIPTION')[, 'Version'])
 version <- gsub('-', '.', version)
 ```
 
-[![R-CMD-check](https://github.com/tsmodels/tsets/workflows/R-CMD-check/badge.svg)](https://github.com/tsmodels/tsets/actions)
+[![R-CMD-check](https://github.com/tsmodels/tsgam/workflows/R-CMD-check/badge.svg)](https://github.com/tsmodels/tsgam/actions)
 [![Last-changedate](https://img.shields.io/badge/last%20change-`r gsub('-', '--', Sys.Date())`-yellowgreen.svg)](/commits/master)
 [![packageversion](https://img.shields.io/badge/Package%20version-`r version`-orange.svg?style=flat-square)](commits/master)
-[![CRAN_Status_Badge](https://www.r-pkg.org/badges/version/tsets)](https://cran.r-project.org/package=tsets)
+[![CRAN_Status_Badge](https://www.r-pkg.org/badges/version/tsgam)](https://cran.r-project.org/package=tsgam)
 
 
 ```{r, echo = FALSE}
@@ -21,15 +21,10 @@ knitr::opts_chunk$set(
 )
 ```
 
-# tsets
-Single source of error based state space models (exponential smoothing) including 
-the power MAM model, normalized seasonality and ability to include regressors in 
-the observation equation. Part of a unified time series framework using methods 
-and classes from tsmethods. Estimation supports automatic differentiation via the
-TMB package.
-
-Since v.1.9.0, missing values are automatically handled via the prediction/update 
-step during estimation.
+# tsgam
+Wrapper for the Generalized Additive Model in package mgcv to conform with tsmodels
+output and framework.  It is a more abstract/general layer than other models in
+tsmodels due to the nature of GAMs.
 
 ## Installation
 
