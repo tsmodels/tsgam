@@ -1,2 +1,5 @@
 # 2022-10-02 v0.1.0 [AG]
 - First upload of package.
+
+# 2022-10-07 v0.2.0 [AG]
+- Added methods for summary, fitted, residuals, tsmetrics and tsdecompose

@@ -103,9 +103,11 @@ predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, 
   if (any(is.na(newdata))) stop("\nno NAs allowed in data")
   mean_prediction <- predict(object$model, newdata = newx)
   if (is.matrix(mean_prediction)) mean_prediction <- prediction[,1]
-
+  # create the decomposition
+  decomp <- decompose_model(object, newdata = newx, type = "predict")
+  decomp <- xts(decomp, index(newdata))
   if (!is.null(distribution)) {
-    if(object$model$family$family != "gaussian") stop("\ndistribution option only available for models estimated using gaussian family")
+    if (object$model$family$family != "gaussian") stop("\ndistribution option only available for models estimated using gaussian family")
     # estimate distribution on residuals of model
     # predict given mu and distributional parameters
     spec <- distribution_modelspec(residuals(object$model, type = "response"), distribution = distribution)
@@ -137,8 +139,10 @@ predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, 
       colnames(simulated_draws) <- as.character(index(newdata))
       class(simulated_draws) <- "tsmodel.distribution"
       attr(simulated_draws, "date_class") <- object$time_class
-      simulated_draws <- list(original_series = zoo(object$model$y, object$spec$clean_time_index), distribution = simulated_draws, mean = zoo(mean_prediction, index(newdata)))
-      class(simulated_draws) <- "tsmodel.predict"
+      simulated_draws <- list(original_series = zoo(object$model$y, object$spec$clean_time_index),
+                              distribution = simulated_draws,
+                              mean = zoo(mean_prediction, index(newdata)), decomposition = decomp)
+      class(simulated_draws) <- c("gam.predict","tsmodel.predict")
       return(simulated_draws)
     }
   } else {
@@ -166,8 +170,9 @@ predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, 
       colnames(simulated_draws) <- as.character(index(newdata))
       class(simulated_draws) <- "tsmodel.distribution"
       attr(simulated_draws, "date_class") <- object$time_class
-      simulated_draws <- list(original_series = zoo(object$model$y, object$spec$clean_time_index), distribution = simulated_draws, mean = zoo(mean_prediction, index(newdata)))
-      class(simulated_draws) <- "tsmodel.predict"
+      simulated_draws <- list(original_series = zoo(object$model$y, object$spec$clean_time_index),
+                              distribution = simulated_draws, mean = zoo(mean_prediction, index(newdata)),decomposition = decomp)
+      class(simulated_draws) <- c("gam.predict","tsmodel.predict")
       return(simulated_draws)
     }
   }

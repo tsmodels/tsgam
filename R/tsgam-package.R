@@ -3,9 +3,9 @@
 #' @import tsmethods
 #' @import data.table
 #' @import mgcv
-#' @importFrom stats as.formula gaussian quantile na.omit predict residuals
+#' @importFrom stats as.formula gaussian quantile na.omit predict residuals coef fitted AIC
 #' @importFrom gratia predicted_samples
-#' @importFrom tsaux smape mape bias crps msis mis sampling_frequency
+#' @importFrom tsaux smape mape bias crps msis mis mslre sampling_frequency
 #' @importFrom future.apply future_lapply
 #' @importFrom future %<-%
 #' @importFrom tsdistributions distribution_modelspec rdist
