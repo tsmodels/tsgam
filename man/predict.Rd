@@ -11,6 +11,8 @@
   nsim = 9000,
   tabular = FALSE,
   distribution = NULL,
+  innov = NULL,
+  innov_type = "q",
   ...
 )
 }
@@ -28,6 +30,14 @@ of an object of tsmodels.predict}
 response residuals and then proxy for the predictive distribution. Only valid if the estimated
 model used the gaussian family, else will throw an error.}
 
+\item{innov}{an optional matrix of innovations (see innov_type for admissible types),
+of dimensions nsim x horizon.}
+
+\item{innov_type}{if \\sQuote{innov} is not NULL, then this denotes the type of values
+passed, with \\dQuote{q} denoting quantile probabilities (default and
+backwards compatible), \\dQuote{z} for standardized errors and \\dQuote{r} for
+raw innovations (non standardized). See details.}
+
 \item{...}{not currently used.}
 }
 \value{
@@ -43,4 +53,16 @@ has proven to be problematic in certain cases.
 }
 \description{
 Prediction function for class \dQuote{gam.estimate}.
+}
+\details{
+The \dQuote{distribution} and \dQuote{innovations} arguments allow for significant customization
+of the simulated distribution. When \dQuote{innov_type} is type q, then the values
+are transformed back to normally distributed predictions using the normal quantile function
+with mean the prediction vector and standard deviation calculated from the model residuals.
+If distribution is also not NULL, then instead of using the normal quantile function, a model
+if first fitted to the residuals given the distribution chosen and the quantile function of
+that distribution is used to transform the uniform value.
+When \dQuote{innov_type} is either z or r, then the values are simply rescaled using the
+standard deviation of the residuals (for type z), and re-centered by the prediction means
+(for type z and r).
 }
