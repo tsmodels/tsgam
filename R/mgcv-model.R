@@ -3,7 +3,9 @@
 #' @description Sets up a gam model via formula.
 #' @param formula a valid gam formula.
 #' @param data an xts matrix of the data.
-#' @param family a valid gam distribution famiily
+#' @param family a valid gam distribution family. Currently on the \dQuote{gaussian}
+#' and \dQuote{gaulss} are fully supported. In the later case, the formula is a list
+#' of length 2 with a formula for the mean response and one for the standard deviation.
 #' @param ... additional arguments (none currently supported).
 #' @return An object of class \dQuote{gam.spec}.
 #' @note This is a wrapper to the gam function from the mgcv package.
@@ -16,18 +18,30 @@ gam_modelspec <- function(formula, data, family = gaussian(link = "identity"), .
   if (!is.xts(data)) {
     stop("data must be an xts object")
   }
-  if (!is(formula,"formula")) {
-    formula <- as.formula(formula)
+
+  if (family$family == "gaulss") {
+    # formula must be list of length 2
+    if (!is(formula, "list")) stop("\nfor the gaulss family, formula must be a list of length 2.")
+    if (!is(formula[[1]],"formula")) formula[[1]] <- as.formula(formula[[1]])
+    if (!is(formula[[2]],"formula")) formula[[2]] <- as.formula(formula[[2]])
+    formula_vars <- unique(as.vector(unlist(sapply(formula, function(x) all.vars(f_rhs(x))))))
+    response_var <- all.vars(f_lhs(formula[[1]]))
+  } else if (family$family == "gaussian") {
+    if (!is(formula,"formula")) {
+      formula <- as.formula(formula)
+    }
+    formula_vars <- all.vars(f_rhs(formula))
+    response_var <- all.vars(f_lhs(formula))
   }
-  # check formula against data
-  formula_vars <- all.vars(formula)
   data_vars <- colnames(data)
-  data <- data[,formula_vars]
+  data <- data[,c(response_var,formula_vars)]
   check <- all.equal(formula_vars, colnames(data))
   if (!check) stop("\ndata variables do not match formula variables/")
   time_zone <- tzone(index(data))
   spec <- list()
   spec$formula <- formula
+  spec$response_var <- response_var
+  spec$formula_vars <- formula_vars
   spec$data <- as.data.frame(data, row.names = FALSE)
   spec$time_index <- index(data)
   spec$clean_time_index <- index(na.omit(data))
@@ -57,12 +71,9 @@ gam_modelspec <- function(formula, data, family = gaussian(link = "identity"), .
 estimate.gam.spec <- function(object, ...)
 {
   mod <- gam(formula = object$formula, family = object$family, data = object$data, ...)
-  extra <- list()
-  extra$time_index <- object$time_index
-  extra$time_class <- object$time_class
-  extra$clean_time_index <- object$clean_time_index
-  extra$time_zone <- object$time_zone
-  out <- list(model = mod, spec = extra)
+  spec <- object
+  spec$data <- NULL
+  out <- list(model = mod, spec = spec)
   class(out) <- "gam.estimate"
   return(out)
 }
@@ -87,7 +98,7 @@ estimate.gam.spec <- function(object, ...)
 #' @param ... not currently used.
 #' @return An object which inherits class \dQuote{tsmodel.predict} with slots for
 #' the simulated predictive distribution, the original series (as a
-#' zoo object), the original specification object and the mean forecast. If tabular
+#' xts object), the original specification object and the mean forecast. If tabular
 #' is TRUE, will return a data.table object of the predictions in long format with
 #' some additional columns.
 #' Using a gaussian distribution for estimation followed by a custom distribution for fitting
@@ -111,32 +122,50 @@ estimate.gam.spec <- function(object, ...)
 #' @export
 #'
 #'
-predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, distribution = NULL, innov = NULL, innov_type = "q", ...)
+predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, distribution = NULL,
+                                 innov = NULL, innov_type = "q", ...)
 {
   # setup data.table variable names to avoid notes in checking
   prediction <- parameter <- forecast_date <- estimation_date <- draw <- value <- NULL
   `.` <- list
+
+  # if family == gaulss set and distribution is NULL, set it to norm since simulate.gam
+  # does not seem to be working for this family
+  # if (object$model$family$family == "gaulss" & is.null(distribution)) {
+  #  distribution <- "norm"
+  #}
+
+  check <- validate_prediction_inputs(newdata, object$spec$formula_vars)
+  if (!check) stop("\nvariables names of newdata do not match those in the input data")
   newx <- as.data.frame(newdata)
   if (any(is.na(newdata))) stop("\nno NAs allowed in data")
-  mean_prediction <- predict(object$model, newdata = newx)
-  if (is.matrix(mean_prediction)) mean_prediction <- prediction[,1]
+  prediction <- predict(object$model, newdata = newx, type = "response")
+  if (is.matrix(prediction)) {
+    mean_prediction <- prediction[,1]
+    sigma_prediction <- 1/prediction[,2]
+    sigma_model <- 1/fitted(object$model ,type = "response")[,2]
+  } else {
+    mean_prediction <- prediction
+    sigma_model <- sd(residuals(object$model, type = "response"))
+    sigma_prediction <- rep(sigma_model, length(mean_prediction))
+  }
   # create the decomposition
   decomp <- decompose_model(object, newdata = newx, type = "predict")
   decomp <- xts(decomp, index(newdata))
-  if (!is.null(innov) & innov_type != "q") distribution <- NULL
-  if (!is.null(distribution)) {
-    if (object$model$family$family != "gaussian") stop("\ndistribution option only available for models estimated using gaussian family")
+  res <- residuals(object$model, type = "response")
+  z <- res/sigma_model
+  if (!is.null(distribution) & is.null(innov)) {
+    if (object$model$family$family != "gaussian" & object$model$family$family != "gaulss") stop("\ndistribution option only available for models estimated using gaussian or gaulss family")
     # estimate distribution on residuals of model
     # predict given mu and distributional parameters
-    spec <- distribution_modelspec(residuals(object$model, type = "response"), distribution = distribution)
+    spec <- distribution_modelspec(z, distribution = distribution)
     distribution_fit <- estimate(spec)
     p_matrix <- distribution_fit$spec$parmatrix
-    sigma <- p_matrix[parameter == "sigma"]$value
     skew <- p_matrix[parameter == "skew"]$value
     shape <- p_matrix[parameter == "shape"]$value
     lambda <- p_matrix[parameter == "lambda"]$value
     simulated_draws <- do.call(cbind, lapply(1:length(mean_prediction), function(i) {
-      rdist(distribution = distribution, n = nsim, mu = mean_prediction[i], sigma = sigma,
+      rdist(distribution = distribution, n = nsim, mu = mean_prediction[i], sigma = sigma_prediction[i],
                              skew = skew, shape = shape, lambda = lambda)
     }))
     if (tabular) {
@@ -144,9 +173,9 @@ predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, 
       simulated_draws[,draw := 1:.N]
       simulated_draws <- melt(simulated_draws, id.vars = "draw", measure.vars = 1:(ncol(simulated_draws) - 1), variable.name = "forecast_date", value.name = "value")
       if (object$spec$time_class == "POSIXct") {
-        fun <- as.POSIXct
+        fun <- fastPOSIXct
       } else {
-        fun <- as.Date
+        fun <- fastDate
       }
       simulated_draws[,forecast_date := fun(forecast_date, tz = object$spec$time_zone)]
       e_date <- max(object$spec$clean_time_index)
@@ -156,10 +185,10 @@ predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, 
       simulated_draws <- as.matrix(simulated_draws)
       colnames(simulated_draws) <- as.character(index(newdata))
       class(simulated_draws) <- "tsmodel.distribution"
-      attr(simulated_draws, "date_class") <- object$time_class
-      simulated_draws <- list(original_series = zoo(object$model$y, object$spec$clean_time_index),
+      attr(simulated_draws, "date_class") <- object$spec$time_class
+      simulated_draws <- list(original_series = xts(object$model$y, object$spec$clean_time_index),
                               distribution = simulated_draws,
-                              mean = zoo(mean_prediction, index(newdata)), decomposition = decomp)
+                              mean = xts(mean_prediction, index(newdata)), decomposition = decomp)
       class(simulated_draws) <- c("gam.predict","tsmodel.predict")
       return(simulated_draws)
     }
@@ -188,25 +217,24 @@ predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, 
       sig <- sd(object$model$residuals)
       if (innov_type == "q") {
         if (!is.null(distribution)) {
-          spec <- distribution_modelspec(residuals(object$model, type = "response"), distribution = distribution)
+          spec <- distribution_modelspec(z, distribution = distribution)
           distribution_fit <- estimate(spec)
           p_matrix <- distribution_fit$spec$parmatrix
-          sigma <- p_matrix[parameter == "sigma"]$value
           skew <- p_matrix[parameter == "skew"]$value
           shape <- p_matrix[parameter == "shape"]$value
           lambda <- p_matrix[parameter == "lambda"]$value
           simulated_draws <- do.call(cbind, lapply(1:length(mean_prediction), function(i) {
-            qdist(distribution = distribution, p = innov[,i], mu = mean_prediction[i], sigma = sigma,
+            qdist(distribution = distribution, p = innov[,i], mu = mean_prediction[i], sigma = sigma_prediction[i],
                   skew = skew, shape = shape, lambda = lambda)
           }))
         } else {
           simulated_draws <- do.call(cbind, lapply(1:length(mean_prediction), function(i) {
-            qdist(distribution = "norm", p = innov[,i], mu = mean_prediction[i], sigma = sig)
+            qdist(distribution = "norm", p = innov[,i], mu = mean_prediction[i], sigma = sigma_prediction[i])
             }))
         }
       } else {
         if (innov_type == "z") {
-          simulated_draws <- sweep(innov, 2, sig, "*")
+          simulated_draws <- sweep(innov, 2, sigma_prediction, "*")
           simulated_draws <- sweep(simulated_draws, 2, mean_prediction, "+")
         } else {
           simulated_draws <- sweep(innov, 2, mean_prediction, "+")
@@ -217,9 +245,9 @@ predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, 
         simulated_draws[,draw := 1:.N]
         simulated_draws <- melt(simulated_draws, id.vars = "draw", measure.vars = 1:(ncol(simulated_draws) - 1), variable.name = "forecast_date", value.name = "value")
         if (object$spec$time_class == "POSIXct") {
-          fun <- as.POSIXct
+          fun <- fastPOSIXct
         } else {
-          fun <- as.Date
+          fun <- fastDate
         }
         simulated_draws[,forecast_date := fun(forecast_date, tz = object$spec$time_zone)]
         e_date <- max(object$spec$clean_time_index)
@@ -229,15 +257,15 @@ predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, 
         simulated_draws <- as.matrix(simulated_draws)
         colnames(simulated_draws) <- as.character(index(newdata))
         class(simulated_draws) <- "tsmodel.distribution"
-        attr(simulated_draws, "date_class") <- object$time_class
-        simulated_draws <- list(original_series = zoo(object$model$y, object$spec$clean_time_index),
+        attr(simulated_draws, "date_class") <- object$spec$time_class
+        simulated_draws <- list(original_series = xts(object$model$y, object$spec$clean_time_index),
                                 distribution = simulated_draws,
-                                mean = zoo(mean_prediction, index(newdata)), decomposition = decomp)
+                                mean = xts(mean_prediction, index(newdata)), decomposition = decomp)
         class(simulated_draws) <- c("gam.predict","tsmodel.predict")
         return(simulated_draws)
       }
     } else {
-      simulated_draws <- as.data.table(predicted_samples(object$model, n = nsim, newdata = newx))
+      simulated_draws <- as.data.table(predicted_samples(object$model, n = nsim, data = newx))
       simulated_draws <- dcast(simulated_draws, draw~row, value.var = "response")
       simulated_draws <- simulated_draws[order(draw)]
       if (tabular) {
@@ -245,9 +273,9 @@ predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, 
         colnames(simulated_draws) <- c("draw", as.character(index(newdata)))
         simulated_draws <- melt(simulated_draws, id.vars = "draw", measure.vars = 2:ncol(simulated_draws), variable.name = "forecast_date", value.name = "value")
         if (object$spec$time_class == "POSIXct") {
-          fun <- as.POSIXct
+          fun <- fastPOSIXct
         } else {
-          fun <- as.Date
+          fun <- fastDate
         }
         simulated_draws[,forecast_date := fun(forecast_date, tz = object$spec$time_zone)]
         e_date <- max(object$spec$clean_time_index)
@@ -260,9 +288,9 @@ predict.gam.estimate <- function(object, newdata, nsim = 9000, tabular = FALSE, 
         simulated_draws <- as.matrix(simulated_draws)
         colnames(simulated_draws) <- as.character(index(newdata))
         class(simulated_draws) <- "tsmodel.distribution"
-        attr(simulated_draws, "date_class") <- object$time_class
-        simulated_draws <- list(original_series = zoo(object$model$y, object$spec$clean_time_index),
-                                distribution = simulated_draws, mean = zoo(mean_prediction, index(newdata)),decomposition = decomp)
+        attr(simulated_draws, "date_class") <- object$spec$time_class
+        simulated_draws <- list(original_series = xts(object$model$y, object$spec$clean_time_index),
+                                distribution = simulated_draws, mean = xts(mean_prediction, index(newdata)),decomposition = decomp)
         class(simulated_draws) <- c("gam.predict","tsmodel.predict")
         return(simulated_draws)
       }
@@ -295,8 +323,17 @@ gam_trainspec <- function(formula, family = gaussian(link = "identity"), data, e
   if (!is.xts(data)) {
     stop("data must be an xts object")
   }
-  if (!is(formula,"formula")) {
-    formula <- as.formula(formula)
+  if (family$family == "gaulss") {
+    # formula must be list of length 2
+    if (!is(formula, "list")) stop("\nfor the gaulss family, formula must be a list of length 2.")
+    if (!is(formula[[1]],"formula")) formula[[1]] <- as.formula(formula[[1]])
+    if (!is(formula[[2]],"formula")) formula[[2]] <- as.formula(formula[[2]])
+    formula_vars <- unique(sapply(formula, function(x) all.vars(x)))
+  } else if (family$family == "gaussian") {
+    if (!is(formula,"formula")) {
+      formula <- as.formula(formula)
+    }
+    formula_vars <- all.vars(formula)
   }
   if (!is.list(prediction_dates)) stop("\nprediction_dates must be a list")
   n <- length(estimation_dates)
@@ -317,7 +354,6 @@ gam_trainspec <- function(formula, family = gaussian(link = "identity"), data, e
     if (any(!check)) stop("\nvalidation failed for prediction_dates in data dates.")
   }
   # check formula against data
-  formula_vars <- all.vars(formula)
   data_vars <- colnames(data)
   data <- data[,formula_vars]
   check <- all.equal(formula_vars, colnames(data))
@@ -363,6 +399,7 @@ gam_trainspec <- function(formula, family = gaussian(link = "identity"), data, e
 #'
 tsbacktest.gam.trainspec <- function(object, alpha = NULL, trace = FALSE, nsim = 5000, distribution = NULL, tabular = FALSE, ...)
 {
+  b <- NULL
   if (!is.null(alpha)) {
     if (any(alpha <= 0)) {
       stop("\nalpha must be strictly positive")

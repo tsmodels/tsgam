@@ -11,7 +11,9 @@ gam_modelspec(formula, data, family = gaussian(link = "identity"), ...)
 
 \item{data}{an xts matrix of the data.}
 
-\item{family}{a valid gam distribution famiily}
+\item{family}{a valid gam distribution family. Currently on the \dQuote{gaussian}
+and \dQuote{gaulss} are fully supported. In the later case, the formula is a list
+of length 2 with a formula for the mean response and one for the standard deviation.}
 
 \item{...}{additional arguments (none currently supported).}
 }

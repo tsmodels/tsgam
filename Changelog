@@ -1,3 +1,10 @@
+# 2023-04-20 v0.3.0 [AG]
+- Added more flexible options in the predict function such as passing custom
+innovations.
+- Added a multi-GAM model (mgam) with optional pooling arguments and
+custom predict function to include copula based dependency in the
+predictive distribution.
+
 # 2022-10-02 v0.1.0 [AG]
 - First upload of package.
 
