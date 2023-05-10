@@ -12,7 +12,7 @@ validate_prediction_ids <- function(newdata, olddata, series_id)
   if (!all.equal(newdata_id, olddata_id)) stop("\nnewdata series_id do not match those in the model")
   olddata_id <- unique(olddata[[series_id]])
   xnewdata <- lapply(1:length(olddata_id), function(i){
-    return(newdata[eval(parse(text = paste0(series_id,"==",olddata_id[i])))])
+    return(newdata[eval(parse(text = paste0(series_id,"=='",olddata_id[i],"'")))])
   })
   xnewdata <- rbindlist(xnewdata)
   return(xnewdata)
