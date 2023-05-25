@@ -35,8 +35,8 @@ gam_modelspec <- function(formula, data, family = gaussian(link = "identity"), .
   }
   data_vars <- colnames(data)
   data <- data[,c(response_var,formula_vars)]
-  check <- formula_vars %in% colnames(data)
-  if (!check) stop("\ndata variables do not match formula variables/")
+  check <- all(formula_vars %in% colnames(data))
+  if (!check) stop("\ndata variables do not match formula variables.")
   time_zone <- tzone(index(data))
   spec <- list()
   spec$formula <- formula
